@@ -15,6 +15,7 @@ const client = new Client({
 });
 
 const TOKEN = process.env.TOKEN;
+
 let runs = {};
 let userRuns = {};
 
@@ -24,9 +25,7 @@ client.once(Events.ClientReady, () => {
 
 client.on(Events.InteractionCreate, async interaction => {
 
-    // ========================
-    // SLASH COMMANDS
-    // ========================
+    // ================= COMMANDS =================
     if (interaction.isChatInputCommand()) {
 
         // 🔥 HOST
@@ -96,75 +95,80 @@ client.on(Events.InteractionCreate, async interaction => {
             runs[runId].messageId = msg.id;
         }
 
+        // 🔥 RUNS
+        if (interaction.commandName === 'runs') {
+
+            if (Object.keys(runs).length === 0) {
+                return interaction.reply("No active runs.");
+            }
+
+            await interaction.reply("**Active Runs:**");
+
+            for (let id in runs) {
+                const r = runs[id];
+                const full = r.players.length >= r.max;
+
+                const link = `https://discord.com/channels/${interaction.guild.id}/${interaction.channel.id}/${r.messageId}`;
+
+                const embed = new EmbedBuilder()
+                    .setTitle("Run")
+                    .setDescription(`Host: <@${r.host}>\nPlayers: ${r.players.length}/${r.max}\nStatus: ${full ? "FULL" : "Active"}`)
+                    .setColor(0x2b2d31);
+
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`join_${id}`)
+                        .setLabel(full ? "FULL" : "Join")
+                        .setStyle(ButtonStyle.Success)
+                        .setDisabled(full),
+
+                    new ButtonBuilder()
+                        .setLabel("View")
+                        .setStyle(ButtonStyle.Link)
+                        .setURL(link)
+                );
+
+                await interaction.followUp({
+                    embeds: [embed],
+                    components: [row]
+                });
+            }
+        }
+
         // 🔥 LEAVE COMMAND
         if (interaction.commandName === 'leave') {
             const runId = userRuns[interaction.user.id];
             if (!runId) return interaction.reply({ content: "You are not in a run.", ephemeral: true });
 
-            const run = runs[runId];
-
-            run.players = run.players.filter(id => id !== interaction.user.id);
-            delete userRuns[interaction.user.id];
-
-            const channel = await interaction.guild.channels.fetch(run.channelId);
-            await channel.permissionOverwrites.delete(interaction.user.id);
-
+            await handleLeave(interaction, runId);
             await interaction.reply({ content: "You left the run.", ephemeral: true });
         }
 
-        // 🔥 RUNS LIST
-        if (interaction.commandName === 'runs') {
-            if (Object.keys(runs).length === 0) {
-                return interaction.reply("No active runs.");
-            }
-
-            let text = "**Active Runs:**\n\n";
-
-            for (let id in runs) {
-                const r = runs[id];
-                text += `<@${r.host}> — ${r.players.length}/${r.max}\n`;
-            }
-
-            await interaction.reply(text);
-        }
-
-        // 🔥 END RUN COMMAND
+        // 🔥 END COMMAND
         if (interaction.commandName === 'endrun') {
             const runId = userRuns[interaction.user.id];
-            if (!runId) return interaction.reply({ content: "You are not in a run.", ephemeral: true });
+            if (!runId) return interaction.reply({ content: "No run.", ephemeral: true });
 
             const run = runs[runId];
-
             if (run.host !== interaction.user.id) {
-                return interaction.reply({ content: "Only host can end run.", ephemeral: true });
+                return interaction.reply({ content: "Only host can end.", ephemeral: true });
             }
 
-            const channel = await interaction.guild.channels.fetch(run.channelId);
-            await channel.delete();
-
-            run.players.forEach(u => delete userRuns[u]);
-            delete userRuns[run.host];
-            delete runs[runId];
-
+            await endRun(interaction, runId);
             await interaction.reply("Run ended.");
         }
     }
 
-    // ========================
-    // BUTTONS
-    // ========================
+    // ================= BUTTONS =================
     if (interaction.isButton()) {
 
         const [action, runId] = interaction.customId.split("_");
         const run = runs[runId];
-
         if (!run) return interaction.reply({ content: "Run not found.", ephemeral: true });
-
-        if (interaction.message.id !== run.messageId) return;
 
         const user = interaction.user;
 
-        // 🔥 JOIN
+        // JOIN
         if (action === "join") {
 
             if (userRuns[user.id]) {
@@ -179,10 +183,7 @@ client.on(Events.InteractionCreate, async interaction => {
             userRuns[user.id] = runId;
 
             const channel = await interaction.guild.channels.fetch(run.channelId);
-
-            await channel.permissionOverwrites.edit(user.id, {
-                ViewChannel: true
-            });
+            await channel.permissionOverwrites.edit(user.id, { ViewChannel: true });
 
             const spotsLeft = run.max - run.players.length;
 
@@ -195,63 +196,36 @@ client.on(Events.InteractionCreate, async interaction => {
                     .setStyle(ButtonStyle.Secondary)
                     .setDisabled(true);
 
-                const leaveBtn = new ButtonBuilder()
-                    .setCustomId(`leave_${runId}`)
-                    .setLabel("Leave")
-                    .setStyle(ButtonStyle.Danger);
-
-                const endBtn = new ButtonBuilder()
-                    .setCustomId(`end_${runId}`)
-                    .setLabel("End")
-                    .setStyle(ButtonStyle.Secondary);
-
-                row = new ActionRowBuilder().addComponents(disabledJoin, leaveBtn, endBtn);
+                row = new ActionRowBuilder().addComponents(
+                    disabledJoin,
+                    new ButtonBuilder().setCustomId(`leave_${runId}`).setLabel("Leave").setStyle(ButtonStyle.Danger),
+                    new ButtonBuilder().setCustomId(`end_${runId}`).setLabel("End").setStyle(ButtonStyle.Secondary)
+                );
             } else {
                 row = interaction.message.components[0];
             }
 
-            await interaction.update({
-                components: [row]
-            });
+            await interaction.update({ components: [row] });
 
             await interaction.followUp({
                 content: `${user} joined the run. ${spotsLeft} spots left.`
             });
         }
 
-        // 🔥 LEAVE BUTTON
+        // LEAVE
         if (action === "leave") {
-
-            if (!userRuns[user.id]) {
-                return interaction.reply({ content: "You are not in a run.", ephemeral: true });
-            }
-
-            if (userRuns[user.id] !== runId) {
-                return interaction.reply({ content: "You are in another run.", ephemeral: true });
-            }
-
-            run.players = run.players.filter(id => id !== user.id);
-            delete userRuns[user.id];
-
-            const channel = await interaction.guild.channels.fetch(run.channelId);
-            await channel.permissionOverwrites.delete(user.id);
-
+            await handleLeave(interaction, runId);
             await interaction.reply({ content: "You left the run.", ephemeral: true });
         }
 
-        // 🔥 END BUTTON
+        // END
         if (action === "end") {
 
             if (run.host !== user.id) {
                 return interaction.reply({ content: "Only host can end this run.", ephemeral: true });
             }
 
-            const channel = await interaction.guild.channels.fetch(run.channelId);
-            await channel.delete();
-
-            run.players.forEach(u => delete userRuns[u]);
-            delete userRuns[run.host];
-            delete runs[runId];
+            await endRun(interaction, runId);
 
             await interaction.update({
                 content: "Run ended.",
@@ -261,5 +235,39 @@ client.on(Events.InteractionCreate, async interaction => {
         }
     }
 });
+
+// ================= FUNCTIONS =================
+
+async function handleLeave(interaction, runId) {
+    const run = runs[runId];
+    const user = interaction.user;
+
+    run.players = run.players.filter(id => id !== user.id);
+    delete userRuns[user.id];
+
+    const channel = await interaction.guild.channels.fetch(run.channelId);
+    await channel.permissionOverwrites.delete(user.id);
+
+    if (run.host === user.id) {
+        if (run.players.length > 0) {
+            run.host = run.players[0];
+            await interaction.followUp({ content: `<@${run.host}> is now the new host.` });
+        } else {
+            await channel.delete();
+            delete runs[runId];
+        }
+    }
+}
+
+async function endRun(interaction, runId) {
+    const run = runs[runId];
+
+    const channel = await interaction.guild.channels.fetch(run.channelId);
+    await channel.delete();
+
+    run.players.forEach(u => delete userRuns[u]);
+    delete userRuns[run.host];
+    delete runs[runId];
+}
 
 client.login(TOKEN);
