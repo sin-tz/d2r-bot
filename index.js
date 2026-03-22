@@ -4,7 +4,6 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
-    EmbedBuilder,
     Events,
     ChannelType,
     PermissionsBitField
@@ -23,12 +22,28 @@ client.once(Events.ClientReady, () => {
     console.log(`Logged in as ${client.user.tag}`);
 });
 
+// 🔘 BUTTON ROW (NO END BUTTON PUBLIC)
+function createButtons(runId, isFull) {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`join_${runId}`)
+            .setLabel(isFull ? "FULL" : "Join")
+            .setStyle(ButtonStyle.Success)
+            .setDisabled(isFull),
+
+        new ButtonBuilder()
+            .setCustomId(`leave_${runId}`)
+            .setLabel("Leave")
+            .setStyle(ButtonStyle.Danger)
+    );
+}
+
 client.on(Events.InteractionCreate, async interaction => {
 
     // ================= COMMANDS =================
     if (interaction.isChatInputCommand()) {
 
-        // 🔥 HOST
+        // HOST
         if (interaction.commandName === 'host') {
 
             if (userRuns[interaction.user.id]) {
@@ -52,7 +67,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
             runs[runId] = {
                 host: host.id,
-                players: [],
+                players: [host.id],
                 max: 8,
                 channelId: channel.id,
                 messageId: null,
@@ -64,38 +79,41 @@ client.on(Events.InteractionCreate, async interaction => {
 
             await channel.send(`Game: **${game}**\nPassword: **${pass}**`);
 
-            const embed = new EmbedBuilder()
-                .setTitle("NEW RUN ALERT!")
-                .setDescription(`Join TZ run hosted by ${host}`)
-                .setColor(0x2b2d31);
-
-            const joinBtn = new ButtonBuilder()
-                .setCustomId(`join_${runId}`)
-                .setLabel("Join")
-                .setStyle(ButtonStyle.Success);
-
-            const leaveBtn = new ButtonBuilder()
-                .setCustomId(`leave_${runId}`)
-                .setLabel("Leave")
-                .setStyle(ButtonStyle.Danger);
-
-            const endBtn = new ButtonBuilder()
-                .setCustomId(`end_${runId}`)
-                .setLabel("End")
-                .setStyle(ButtonStyle.Secondary);
-
-            const row = new ActionRowBuilder().addComponents(joinBtn, leaveBtn, endBtn);
-
-            const msg = await interaction.reply({
-                embeds: [embed],
-                components: [row],
+            // MAIN MESSAGE
+            const mainMsg = await interaction.reply({
+                content:
+`**NEW RUN ALERT!**
+Join Terror Zone Runs on Non-Ladder hosted by ${host}`,
+                components: [createButtons(runId, false)],
                 fetchReply: true
             });
 
-            runs[runId].messageId = msg.id;
+            runs[runId].messageId = mainMsg.id;
+
+            const spotsLeft = runs[runId].max - runs[runId].players.length;
+
+            // ACTIVITY MESSAGE
+            await interaction.followUp({
+                content: `${host} has started a run. There are ${spotsLeft} spots left.`,
+                components: [createButtons(runId, false)]
+            });
+
+            // 🔴 PRIVATE END BUTTON FOR HOST
+            await interaction.followUp({
+                content: "You can end your run here:",
+                ephemeral: true,
+                components: [
+                    new ActionRowBuilder().addComponents(
+                        new ButtonBuilder()
+                            .setCustomId(`end_${runId}`)
+                            .setLabel("End Run")
+                            .setStyle(ButtonStyle.Secondary)
+                    )
+                ]
+            });
         }
 
-        // 🔥 RUNS
+        // RUNS
         if (interaction.commandName === 'runs') {
 
             if (Object.keys(runs).length === 0) {
@@ -110,41 +128,33 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const link = `https://discord.com/channels/${interaction.guild.id}/${interaction.channel.id}/${r.messageId}`;
 
-                const embed = new EmbedBuilder()
-                    .setTitle("Run")
-                    .setDescription(`Host: <@${r.host}>\nPlayers: ${r.players.length}/${r.max}\nStatus: ${full ? "FULL" : "Active"}`)
-                    .setColor(0x2b2d31);
-
-                const row = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder()
-                        .setCustomId(`join_${id}`)
-                        .setLabel(full ? "FULL" : "Join")
-                        .setStyle(ButtonStyle.Success)
-                        .setDisabled(full),
-
-                    new ButtonBuilder()
-                        .setLabel("View")
-                        .setStyle(ButtonStyle.Link)
-                        .setURL(link)
-                );
-
                 await interaction.followUp({
-                    embeds: [embed],
-                    components: [row]
+                    content:
+`👑 Host: <@${r.host}>
+👥 Players: ${r.players.length}/${r.max}
+Status: ${full ? "FULL" : "Active"}`,
+                    components: [
+                        new ActionRowBuilder().addComponents(
+                            new ButtonBuilder()
+                                .setLabel("View")
+                                .setStyle(ButtonStyle.Link)
+                                .setURL(link)
+                        )
+                    ]
                 });
             }
         }
 
-        // 🔥 LEAVE COMMAND
+        // LEAVE
         if (interaction.commandName === 'leave') {
             const runId = userRuns[interaction.user.id];
             if (!runId) return interaction.reply({ content: "You are not in a run.", ephemeral: true });
 
-            await handleLeave(interaction, runId);
+            await leaveRun(interaction, runId);
             await interaction.reply({ content: "You left the run.", ephemeral: true });
         }
 
-        // 🔥 END COMMAND
+        // END COMMAND
         if (interaction.commandName === 'endrun') {
             const runId = userRuns[interaction.user.id];
             if (!runId) return interaction.reply({ content: "No run.", ephemeral: true });
@@ -186,36 +196,25 @@ client.on(Events.InteractionCreate, async interaction => {
             await channel.permissionOverwrites.edit(user.id, { ViewChannel: true });
 
             const spotsLeft = run.max - run.players.length;
+            const full = run.players.length >= run.max;
 
-            let row;
-
-            if (run.players.length >= run.max) {
-                const disabledJoin = new ButtonBuilder()
-                    .setCustomId(`join_${runId}`)
-                    .setLabel("FULL")
-                    .setStyle(ButtonStyle.Secondary)
-                    .setDisabled(true);
-
-                row = new ActionRowBuilder().addComponents(
-                    disabledJoin,
-                    new ButtonBuilder().setCustomId(`leave_${runId}`).setLabel("Leave").setStyle(ButtonStyle.Danger),
-                    new ButtonBuilder().setCustomId(`end_${runId}`).setLabel("End").setStyle(ButtonStyle.Secondary)
-                );
-            } else {
-                row = interaction.message.components[0];
-            }
-
-            await interaction.update({ components: [row] });
-
-            await interaction.followUp({
-                content: `${user} joined the run. ${spotsLeft} spots left.`
+            await interaction.reply({
+                content: `${user} has been added to <@${run.host}>'s run. There are ${spotsLeft} spots left.`,
+                components: [createButtons(runId, full)]
             });
         }
 
         // LEAVE
         if (action === "leave") {
-            await handleLeave(interaction, runId);
-            await interaction.reply({ content: "You left the run.", ephemeral: true });
+            await leaveRun(interaction, runId);
+
+            const run = runs[runId];
+            const spotsLeft = run ? run.max - run.players.length : 0;
+
+            await interaction.reply({
+                content: `${interaction.user} left the run. There are ${spotsLeft} spots left.`,
+                components: run ? [createButtons(runId, false)] : []
+            });
         }
 
         // END
@@ -227,18 +226,14 @@ client.on(Events.InteractionCreate, async interaction => {
 
             await endRun(interaction, runId);
 
-            await interaction.update({
-                content: "Run ended.",
-                embeds: [],
-                components: []
-            });
+            await interaction.reply("Run ended.");
         }
     }
 });
 
 // ================= FUNCTIONS =================
 
-async function handleLeave(interaction, runId) {
+async function leaveRun(interaction, runId) {
     const run = runs[runId];
     const user = interaction.user;
 
