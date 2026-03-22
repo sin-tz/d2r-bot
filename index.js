@@ -22,8 +22,8 @@ client.once(Events.ClientReady, () => {
     console.log(`Logged in as ${client.user.tag}`);
 });
 
-// 🔘 BUTTON ROW (NO END BUTTON PUBLIC)
-function createButtons(runId, isFull) {
+// BUTTONS
+function mainButtons(runId, isFull) {
     return new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId(`join_${runId}`)
@@ -38,9 +38,18 @@ function createButtons(runId, isFull) {
     );
 }
 
+function joinOnlyButton(runId, isFull) {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`join_${runId}`)
+            .setLabel(isFull ? "FULL" : "Join")
+            .setStyle(ButtonStyle.Success)
+            .setDisabled(isFull)
+    );
+}
+
 client.on(Events.InteractionCreate, async interaction => {
 
-    // ================= COMMANDS =================
     if (interaction.isChatInputCommand()) {
 
         // HOST
@@ -79,28 +88,21 @@ client.on(Events.InteractionCreate, async interaction => {
 
             await channel.send(`Game: **${game}**\nPassword: **${pass}**`);
 
-            // MAIN MESSAGE
-            const mainMsg = await interaction.reply({
+            const spotsLeft = runs[runId].max - runs[runId].players.length;
+
+            const msg = await interaction.reply({
                 content:
 `**NEW RUN ALERT!**
-Join Terror Zone Runs on Non-Ladder hosted by ${host}`,
-                components: [createButtons(runId, false)],
+Join Terror Zone Runs on Non-Ladder hosted by ${host}. There are ${spotsLeft} spots left.`,
+                components: [mainButtons(runId, false)],
                 fetchReply: true
             });
 
-            runs[runId].messageId = mainMsg.id;
+            runs[runId].messageId = msg.id;
 
-            const spotsLeft = runs[runId].max - runs[runId].players.length;
-
-            // ACTIVITY MESSAGE
+            // PRIVATE END BUTTON
             await interaction.followUp({
-                content: `${host} has started a run. There are ${spotsLeft} spots left.`,
-                components: [createButtons(runId, false)]
-            });
-
-            // 🔴 PRIVATE END BUTTON FOR HOST
-            await interaction.followUp({
-                content: "You can end your run here:",
+                content: "End your run:",
                 ephemeral: true,
                 components: [
                     new ActionRowBuilder().addComponents(
@@ -145,7 +147,7 @@ Status: ${full ? "FULL" : "Active"}`,
             }
         }
 
-        // LEAVE
+        // LEAVE COMMAND
         if (interaction.commandName === 'leave') {
             const runId = userRuns[interaction.user.id];
             if (!runId) return interaction.reply({ content: "You are not in a run.", ephemeral: true });
@@ -169,7 +171,7 @@ Status: ${full ? "FULL" : "Active"}`,
         }
     }
 
-    // ================= BUTTONS =================
+    // BUTTONS
     if (interaction.isButton()) {
 
         const [action, runId] = interaction.customId.split("_");
@@ -200,7 +202,7 @@ Status: ${full ? "FULL" : "Active"}`,
 
             await interaction.reply({
                 content: `${user} has been added to <@${run.host}>'s run. There are ${spotsLeft} spots left.`,
-                components: [createButtons(runId, full)]
+                components: [joinOnlyButton(runId, full)]
             });
         }
 
@@ -213,7 +215,7 @@ Status: ${full ? "FULL" : "Active"}`,
 
             await interaction.reply({
                 content: `${interaction.user} left the run. There are ${spotsLeft} spots left.`,
-                components: run ? [createButtons(runId, false)] : []
+                components: run ? [joinOnlyButton(runId, false)] : []
             });
         }
 
@@ -225,14 +227,12 @@ Status: ${full ? "FULL" : "Active"}`,
             }
 
             await endRun(interaction, runId);
-
             await interaction.reply("Run ended.");
         }
     }
 });
 
-// ================= FUNCTIONS =================
-
+// FUNCTIONS
 async function leaveRun(interaction, runId) {
     const run = runs[runId];
     const user = interaction.user;
