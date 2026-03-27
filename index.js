@@ -1,5 +1,3 @@
-require('dotenv').config();
-
 const { 
     Client,
     GatewayIntentBits,
@@ -61,6 +59,8 @@ client.on(Events.InteractionCreate, async interaction => {
                 return interaction.reply({ content: "You are already in a run.", ephemeral: true });
             }
 
+            await interaction.deferReply(); // FIX timeout
+
             const runId = Date.now();
             const host = interaction.user;
 
@@ -92,17 +92,16 @@ client.on(Events.InteractionCreate, async interaction => {
 
             const spotsLeft = runs[runId].max - runs[runId].players.length;
 
-            const msg = await interaction.reply({
+            const msg = await interaction.editReply({
                 content:
 `**NEW RUN ALERT!**
 Join Terror Zone Runs on Non-Ladder hosted by ${host}. There are ${spotsLeft} spots left.`,
-                components: [mainButtons(runId, false)],
-                fetchReply: true
+                components: [mainButtons(runId, false)]
             });
 
             runs[runId].messageId = msg.id;
 
-            // 🔥 AUTO DELETE AFTER 45 MIN
+            // AUTO DELETE AFTER 45 MIN
             setTimeout(async () => {
                 const run = runs[runId];
                 if (!run) return;
