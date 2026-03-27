@@ -1,4 +1,6 @@
-const {
+require('dotenv').config();
+
+const { 
     Client,
     GatewayIntentBits,
     ActionRowBuilder,
@@ -66,7 +68,7 @@ client.on(Events.InteractionCreate, async interaction => {
             const pass = Math.floor(100 + Math.random() * 900);
 
             const channel = await interaction.guild.channels.create({
-                name: `run-${game}`,
+                name: game,
                 type: ChannelType.GuildText,
                 permissionOverwrites: [
                     { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
@@ -100,6 +102,22 @@ Join Terror Zone Runs on Non-Ladder hosted by ${host}. There are ${spotsLeft} sp
 
             runs[runId].messageId = msg.id;
 
+            // 🔥 AUTO DELETE AFTER 45 MIN
+            setTimeout(async () => {
+                const run = runs[runId];
+                if (!run) return;
+
+                const channel = await interaction.guild.channels.fetch(run.channelId).catch(() => null);
+                if (channel) {
+                    await channel.send("⏰ Run expired after 45 minutes. Closing...");
+                    await channel.delete().catch(() => {});
+                }
+
+                run.players.forEach(u => delete userRuns[u]);
+                delete runs[runId];
+
+            }, 45 * 60 * 1000);
+
             // PRIVATE END BUTTON
             await interaction.followUp({
                 content: "End your run:",
@@ -126,6 +144,8 @@ Join Terror Zone Runs on Non-Ladder hosted by ${host}. There are ${spotsLeft} sp
 
             for (let id in runs) {
                 const r = runs[id];
+                if (!r) continue;
+
                 const full = r.players.length >= r.max;
 
                 const link = `https://discord.com/channels/${interaction.guild.id}/${interaction.channel.id}/${r.messageId}`;
@@ -162,7 +182,7 @@ Status: ${full ? "FULL" : "Active"}`,
             if (!runId) return interaction.reply({ content: "No run.", ephemeral: true });
 
             const run = runs[runId];
-            if (run.host !== interaction.user.id) {
+            if (!run || run.host !== interaction.user.id) {
                 return interaction.reply({ content: "Only host can end.", ephemeral: true });
             }
 
@@ -201,20 +221,21 @@ Status: ${full ? "FULL" : "Active"}`,
             const full = run.players.length >= run.max;
 
             await interaction.reply({
-                content: `${user} has been added to <@${run.host}>'s run. There are ${spotsLeft} spots left.`,
+                content: `${user} joined the run. ${spotsLeft} spots left.`,
                 components: [joinOnlyButton(runId, full)]
             });
         }
 
         // LEAVE
         if (action === "leave") {
+
             await leaveRun(interaction, runId);
 
             const run = runs[runId];
             const spotsLeft = run ? run.max - run.players.length : 0;
 
             await interaction.reply({
-                content: `${interaction.user} left the run. There are ${spotsLeft} spots left.`,
+                content: `${interaction.user} left the run. ${spotsLeft} spots left.`,
                 components: run ? [joinOnlyButton(runId, false)] : []
             });
         }
@@ -235,20 +256,25 @@ Status: ${full ? "FULL" : "Active"}`,
 // FUNCTIONS
 async function leaveRun(interaction, runId) {
     const run = runs[runId];
+    if (!run) return;
+
     const user = interaction.user;
 
     run.players = run.players.filter(id => id !== user.id);
     delete userRuns[user.id];
 
-    const channel = await interaction.guild.channels.fetch(run.channelId);
-    await channel.permissionOverwrites.delete(user.id);
+    const channel = await interaction.guild.channels.fetch(run.channelId).catch(() => null);
+    if (channel) await channel.permissionOverwrites.delete(user.id).catch(() => {});
 
     if (run.host === user.id) {
         if (run.players.length > 0) {
             run.host = run.players[0];
-            await interaction.followUp({ content: `<@${run.host}> is now the new host.` });
+            if (channel) {
+                await channel.permissionOverwrites.edit(run.host, { ViewChannel: true });
+                await channel.send(`<@${run.host}> is now the new host.`);
+            }
         } else {
-            await channel.delete();
+            if (channel) await channel.delete().catch(() => {});
             delete runs[runId];
         }
     }
@@ -256,12 +282,12 @@ async function leaveRun(interaction, runId) {
 
 async function endRun(interaction, runId) {
     const run = runs[runId];
+    if (!run) return;
 
-    const channel = await interaction.guild.channels.fetch(run.channelId);
-    await channel.delete();
+    const channel = await interaction.guild.channels.fetch(run.channelId).catch(() => null);
+    if (channel) await channel.delete().catch(() => {});
 
     run.players.forEach(u => delete userRuns[u]);
-    delete userRuns[run.host];
     delete runs[runId];
 }
 
