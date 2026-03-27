@@ -18,8 +18,24 @@ const TOKEN = process.env.TOKEN;
 let runs = {};
 let userRuns = {};
 
-client.once(Events.ClientReady, () => {
+// 🔥 STARTUP + CLEANUP
+client.once(Events.ClientReady, async () => {
     console.log(`Logged in as ${client.user.tag}`);
+
+    // CLEANUP OLD RUN CHANNELS
+    const guilds = client.guilds.cache;
+
+    for (const guild of guilds.values()) {
+        const channels = await guild.channels.fetch();
+
+        channels.forEach(channel => {
+            if (channel && channel.name && channel.name.startsWith("run-")) {
+                channel.delete().catch(() => {});
+            }
+        });
+    }
+
+    console.log("Cleaned up old run channels");
 });
 
 // BUTTONS
@@ -48,6 +64,26 @@ function joinOnlyButton(runId, isFull) {
     );
 }
 
+// 🔥 UPDATE MESSAGE
+async function updateRunMessage(interaction, runId) {
+    const run = runs[runId];
+    if (!run) return;
+
+    const channel = interaction.channel;
+    const msg = await channel.messages.fetch(run.messageId).catch(() => null);
+    if (!msg) return;
+
+    const full = run.players.length >= run.max;
+
+    await msg.edit({
+        content:
+`👑 Host: <@${run.host}>
+👥 Players: ${run.players.length}/${run.max}
+Players: ${run.players.map(id => `<@${id}>`).join(", ")}`,
+        components: [mainButtons(runId, full)]
+    });
+}
+
 client.on(Events.InteractionCreate, async interaction => {
 
     if (interaction.isChatInputCommand()) {
@@ -59,7 +95,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 return interaction.reply({ content: "You are already in a run.", ephemeral: true });
             }
 
-            await interaction.deferReply(); // FIX timeout
+            await interaction.deferReply();
 
             const runId = Date.now();
             const host = interaction.user;
@@ -90,16 +126,14 @@ client.on(Events.InteractionCreate, async interaction => {
 
             await channel.send(`Game: **${game}**\nPassword: **${pass}**`);
 
-            const spotsLeft = runs[runId].max - runs[runId].players.length;
-
             const msg = await interaction.editReply({
-                content:
-`**NEW RUN ALERT!**
-Join Terror Zone Runs on Non-Ladder hosted by ${host}. There are ${spotsLeft} spots left.`,
+                content: "Creating run...",
                 components: [mainButtons(runId, false)]
             });
 
             runs[runId].messageId = msg.id;
+
+            await updateRunMessage(interaction, runId);
 
             // AUTO DELETE AFTER 45 MIN
             setTimeout(async () => {
@@ -172,6 +206,7 @@ Status: ${full ? "FULL" : "Active"}`,
             if (!runId) return interaction.reply({ content: "You are not in a run.", ephemeral: true });
 
             await leaveRun(interaction, runId);
+            await updateRunMessage(interaction, runId);
             await interaction.reply({ content: "You left the run.", ephemeral: true });
         }
 
@@ -216,12 +251,11 @@ Status: ${full ? "FULL" : "Active"}`,
             const channel = await interaction.guild.channels.fetch(run.channelId);
             await channel.permissionOverwrites.edit(user.id, { ViewChannel: true });
 
-            const spotsLeft = run.max - run.players.length;
-            const full = run.players.length >= run.max;
+            await updateRunMessage(interaction, runId);
 
             await interaction.reply({
-                content: `${user} joined the run. ${spotsLeft} spots left.`,
-                components: [joinOnlyButton(runId, full)]
+                content: `${user} joined the run.`,
+                components: [joinOnlyButton(runId, run.players.length >= run.max)]
             });
         }
 
@@ -229,13 +263,10 @@ Status: ${full ? "FULL" : "Active"}`,
         if (action === "leave") {
 
             await leaveRun(interaction, runId);
-
-            const run = runs[runId];
-            const spotsLeft = run ? run.max - run.players.length : 0;
+            await updateRunMessage(interaction, runId);
 
             await interaction.reply({
-                content: `${interaction.user} left the run. ${spotsLeft} spots left.`,
-                components: run ? [joinOnlyButton(runId, false)] : []
+                content: `${interaction.user} left the run.`
             });
         }
 
