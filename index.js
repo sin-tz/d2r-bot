@@ -22,7 +22,6 @@ let userRuns = {};
 client.once(Events.ClientReady, async () => {
     console.log(`Logged in as ${client.user.tag}`);
 
-    // CLEANUP OLD RUN CHANNELS
     const guilds = client.guilds.cache;
 
     for (const guild of guilds.values()) {
@@ -74,11 +73,13 @@ async function updateRunMessage(interaction, runId) {
     if (!msg) return;
 
     const full = run.players.length >= run.max;
+    const spotsLeft = run.max - run.players.length;
 
     await msg.edit({
         content:
 `👑 Host: <@${run.host}>
 👥 Players: ${run.players.length}/${run.max}
+🪑 Spots left: ${spotsLeft}
 Players: ${run.players.map(id => `<@${id}>`).join(", ")}`,
         components: [mainButtons(runId, full)]
     });
@@ -114,7 +115,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
             runs[runId] = {
                 host: host.id,
-                players: [host.id],
+                players: [host.id], // ✅ host auto joins
                 max: 8,
                 channelId: channel.id,
                 messageId: null,
@@ -126,8 +127,11 @@ client.on(Events.InteractionCreate, async interaction => {
 
             await channel.send(`Game: **${game}**\nPassword: **${pass}**`);
 
+            const spotsLeft = runs[runId].max - runs[runId].players.length;
+
             const msg = await interaction.editReply({
-                content: "Creating run...",
+                content: `🚨 **NEW RUN ALERT!**
+Join Terror Zone Runs on Non-Ladder hosted by <@${host.id}>. There are ${spotsLeft} spots left.`,
                 components: [mainButtons(runId, false)]
             });
 
@@ -207,6 +211,7 @@ Status: ${full ? "FULL" : "Active"}`,
 
             await leaveRun(interaction, runId);
             await updateRunMessage(interaction, runId);
+
             await interaction.reply({ content: "You left the run.", ephemeral: true });
         }
 
@@ -253,9 +258,10 @@ Status: ${full ? "FULL" : "Active"}`,
 
             await updateRunMessage(interaction, runId);
 
+            const spotsLeft = run.max - run.players.length;
+
             await interaction.reply({
-                content: `${user} joined the run.`,
-                components: [joinOnlyButton(runId, run.players.length >= run.max)]
+                content: `<@${user.id}> has been added to <@${run.host}>'s run. There are ${spotsLeft} spots left.`
             });
         }
 
