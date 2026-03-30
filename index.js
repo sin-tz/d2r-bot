@@ -69,7 +69,7 @@ async function updateRunMessage(interaction, runId) {
     const run = runs[runId];
     if (!run) return;
 
-    const channel = interaction.channel;
+    const channel = await interaction.guild.channels.fetch(run.publicChannelId);
     const msg = await channel.messages.fetch(run.messageId).catch(() => null);
     if (!msg) return;
 
@@ -104,7 +104,7 @@ client.on(Events.InteractionCreate, async interaction => {
             const game = `run-${Math.floor(Math.random() * 1000)}`;
             const pass = Math.floor(100 + Math.random() * 900);
 
-            const channel = await interaction.guild.channels.create({
+            const privateChannel = await interaction.guild.channels.create({
                 name: game,
                 type: ChannelType.GuildText,
                 permissionOverwrites: [
@@ -118,7 +118,8 @@ client.on(Events.InteractionCreate, async interaction => {
                 players: [host.id],
                 fillers: 0,
                 max: 8,
-                channelId: channel.id,
+                channelId: privateChannel.id,
+                publicChannelId: interaction.channel.id, // ✅ STORED
                 messageId: null,
                 game,
                 pass
@@ -126,10 +127,10 @@ client.on(Events.InteractionCreate, async interaction => {
 
             userRuns[host.id] = runId;
 
-            await channel.send(`Game: **${game}**\nPassword: **${pass}**`);
+            await privateChannel.send(`Game: **${game}**\nPassword: **${pass}**`);
 
-            // 🔥 FILLER DROPDOWN (PRIVATE CHANNEL)
-            await channel.send({
+            // 🔥 FILLER DROPDOWN (PRIVATE ONLY)
+            await privateChannel.send({
                 content: "Set filler spots (host only):",
                 components: [
                     new ActionRowBuilder().addComponents(
@@ -146,7 +147,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 ]
             });
 
-            const spotsLeft = runs[runId].max - (runs[runId].players.length + runs[runId].fillers);
+            const spotsLeft = 7;
 
             const msg = await interaction.editReply({
                 content: `🚨 **NEW RUN ALERT!**
@@ -185,6 +186,41 @@ Join Terror Zone Runs on Non-Ladder hosted by <@${host.id}>. There are ${spotsLe
                     )
                 ]
             });
+        }
+
+        // RUNS
+        if (interaction.commandName === 'runs') {
+
+            if (Object.keys(runs).length === 0) {
+                return interaction.reply("No active runs.");
+            }
+
+            await interaction.reply("**Active Runs:**");
+
+            for (let id in runs) {
+                const r = runs[id];
+                if (!r) continue;
+
+                const total = r.players.length + r.fillers;
+                const full = total >= r.max;
+
+                const link = `https://discord.com/channels/${interaction.guild.id}/${r.publicChannelId}/${r.messageId}`;
+
+                await interaction.followUp({
+                    content:
+`👑 Host: <@${r.host}>
+👥 Players: ${r.players.length} + ${r.fillers} fillers / ${r.max}
+Status: ${full ? "FULL" : "Active"}`,
+                    components: [
+                        new ActionRowBuilder().addComponents(
+                            new ButtonBuilder()
+                                .setLabel("View")
+                                .setStyle(ButtonStyle.Link)
+                                .setURL(link)
+                        )
+                    ]
+                });
+            }
         }
 
         // LEAVE
@@ -291,9 +327,17 @@ Join Terror Zone Runs on Non-Ladder hosted by <@${host.id}>. There are ${spotsLe
 
             const spotsLeft = run.max - (run.players.length + run.fillers);
 
-            // ✅ PUBLIC MESSAGE (LIKE JOIN LOG)
-            await interaction.reply({
+            // ✅ PUBLIC MESSAGE (CORRECT CHANNEL)
+            const publicChannel = await interaction.guild.channels.fetch(run.publicChannelId);
+
+            await publicChannel.send({
                 content: `⚙️ <@${interaction.user.id}> set filler spots from ${oldFillers} to ${run.fillers}. There are ${spotsLeft} spots left.`
+            });
+
+            // silent reply in private
+            await interaction.reply({
+                content: `Fillers updated.`,
+                ephemeral: true
             });
         }
     }
