@@ -63,7 +63,7 @@ function joinOnlyButton(runId, isFull) {
     );
 }
 
-// 🔥 UPDATE MESSAGE
+// 🔥 UPDATE MAIN MESSAGE (keeps ALERT style)
 async function updateRunMessage(interaction, runId) {
     const run = runs[runId];
     if (!run) return;
@@ -76,11 +76,8 @@ async function updateRunMessage(interaction, runId) {
     const spotsLeft = run.max - run.players.length;
 
     await msg.edit({
-        content:
-`👑 Host: <@${run.host}>
-👥 Players: ${run.players.length}/${run.max}
-🪑 Spots left: ${spotsLeft}
-Players: ${run.players.map(id => `<@${id}>`).join(", ")}`,
+        content: `🚨 **NEW RUN ALERT!**
+Join Terror Zone Runs on Non-Ladder hosted by <@${run.host}>. There are ${spotsLeft} spots left.`,
         components: [mainButtons(runId, full)]
     });
 }
@@ -115,7 +112,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
             runs[runId] = {
                 host: host.id,
-                players: [host.id], // ✅ host auto joins
+                players: [host.id],
                 max: 8,
                 channelId: channel.id,
                 messageId: null,
@@ -136,8 +133,6 @@ Join Terror Zone Runs on Non-Ladder hosted by <@${host.id}>. There are ${spotsLe
             });
 
             runs[runId].messageId = msg.id;
-
-            await updateRunMessage(interaction, runId);
 
             // AUTO DELETE AFTER 45 MIN
             setTimeout(async () => {
@@ -256,12 +251,15 @@ Status: ${full ? "FULL" : "Active"}`,
             const channel = await interaction.guild.channels.fetch(run.channelId);
             await channel.permissionOverwrites.edit(user.id, { ViewChannel: true });
 
+            // ✅ UPDATE MAIN MESSAGE
             await updateRunMessage(interaction, runId);
 
+            // ✅ SEND LOG MESSAGE
             const spotsLeft = run.max - run.players.length;
 
             await interaction.reply({
-                content: `<@${user.id}> has been added to <@${run.host}>'s run. There are ${spotsLeft} spots left.`
+                content: `<@${user.id}> has been added to <@${run.host}>'s run. There are ${spotsLeft} spots left.`,
+                components: [joinOnlyButton(runId, run.players.length >= run.max)]
             });
         }
 
