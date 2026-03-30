@@ -23,9 +23,7 @@ let userRuns = {};
 client.once(Events.ClientReady, async () => {
     console.log(`Logged in as ${client.user.tag}`);
 
-    const guilds = client.guilds.cache;
-
-    for (const guild of guilds.values()) {
+    for (const guild of client.guilds.cache.values()) {
         const channels = await guild.channels.fetch();
 
         channels.forEach(channel => {
@@ -64,7 +62,7 @@ function joinOnlyButton(runId, isFull) {
     );
 }
 
-// 🔥 UPDATE MAIN MESSAGE
+// 🔥 UPDATE MAIN MESSAGE (SAFE)
 async function updateRunMessage(interaction, runId) {
     const run = runs[runId];
     if (!run) return;
@@ -79,7 +77,9 @@ async function updateRunMessage(interaction, runId) {
 
     await msg.edit({
         content: `🚨 **NEW RUN ALERT!**
-Join Terror Zone Runs on Non-Ladder hosted by <@${run.host}>. There are ${spotsLeft} spots left.`,
+Join Terror Zone Runs on Non-Ladder hosted by <@${run.host}>. ${
+            full ? "This run is FULL." : `There are ${spotsLeft} spots left.`
+        }`,
         components: [mainButtons(runId, full)]
     });
 }
@@ -119,7 +119,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 fillers: 0,
                 max: 8,
                 channelId: privateChannel.id,
-                publicChannelId: interaction.channel.id, // ✅ STORED
+                publicChannelId: interaction.channel.id,
                 messageId: null,
                 game,
                 pass
@@ -129,7 +129,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
             await privateChannel.send(`Game: **${game}**\nPassword: **${pass}**`);
 
-            // 🔥 FILLER DROPDOWN (PRIVATE ONLY)
+            // 🔥 DROPDOWN (PRIVATE)
             await privateChannel.send({
                 content: "Set filler spots (host only):",
                 components: [
@@ -279,10 +279,11 @@ Status: ${full ? "FULL" : "Active"}`,
             await updateRunMessage(interaction, runId);
 
             const spotsLeft = run.max - (run.players.length + run.fillers);
+            const isFull = (run.players.length + run.fillers) >= run.max;
 
             await interaction.reply({
                 content: `<@${user.id}> has been added to <@${run.host}>'s run. There are ${spotsLeft} spots left.`,
-                components: [joinOnlyButton(runId, (run.players.length + run.fillers) >= run.max)]
+                components: [joinOnlyButton(runId, isFull)]
             });
         }
 
@@ -325,16 +326,17 @@ Status: ${full ? "FULL" : "Active"}`,
 
             await updateRunMessage(interaction, runId);
 
-            const spotsLeft = run.max - (run.players.length + run.fillers);
-
-            // ✅ PUBLIC MESSAGE (CORRECT CHANNEL)
             const publicChannel = await interaction.guild.channels.fetch(run.publicChannelId);
 
+            const total = run.players.length + run.fillers;
+            const isFull = total >= run.max;
+            const spotsLeft = run.max - total;
+
             await publicChannel.send({
-                content: `⚙️ <@${interaction.user.id}> set filler spots from ${oldFillers} to ${run.fillers}. There are ${spotsLeft} spots left.`
+                content: `⚙️ <@${interaction.user.id}> set filler spots from ${oldFillers} to ${run.fillers}. There are ${spotsLeft} spots left.`,
+                components: [joinOnlyButton(runId, isFull)]
             });
 
-            // silent reply in private
             await interaction.reply({
                 content: `Fillers updated.`,
                 ephemeral: true
