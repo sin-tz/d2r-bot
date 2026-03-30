@@ -6,7 +6,8 @@ const {
     ButtonStyle,
     Events,
     ChannelType,
-    PermissionsBitField
+    PermissionsBitField,
+    StringSelectMenuBuilder
 } = require('discord.js');
 
 const client = new Client({
@@ -18,7 +19,7 @@ const TOKEN = process.env.TOKEN;
 let runs = {};
 let userRuns = {};
 
-// 🔥 STARTUP + CLEANUP
+// 🔥 STARTUP CLEANUP
 client.once(Events.ClientReady, async () => {
     console.log(`Logged in as ${client.user.tag}`);
 
@@ -63,7 +64,7 @@ function joinOnlyButton(runId, isFull) {
     );
 }
 
-// 🔥 UPDATE MAIN MESSAGE (keeps ALERT style)
+// 🔥 UPDATE MAIN MESSAGE
 async function updateRunMessage(interaction, runId) {
     const run = runs[runId];
     if (!run) return;
@@ -72,8 +73,9 @@ async function updateRunMessage(interaction, runId) {
     const msg = await channel.messages.fetch(run.messageId).catch(() => null);
     if (!msg) return;
 
-    const full = run.players.length >= run.max;
-    const spotsLeft = run.max - run.players.length;
+    const total = run.players.length + run.fillers;
+    const full = total >= run.max;
+    const spotsLeft = run.max - total;
 
     await msg.edit({
         content: `🚨 **NEW RUN ALERT!**
@@ -84,6 +86,7 @@ Join Terror Zone Runs on Non-Ladder hosted by <@${run.host}>. There are ${spotsL
 
 client.on(Events.InteractionCreate, async interaction => {
 
+    // ================= COMMANDS =================
     if (interaction.isChatInputCommand()) {
 
         // HOST
@@ -113,6 +116,7 @@ client.on(Events.InteractionCreate, async interaction => {
             runs[runId] = {
                 host: host.id,
                 players: [host.id],
+                fillers: 0,
                 max: 8,
                 channelId: channel.id,
                 messageId: null,
@@ -124,7 +128,25 @@ client.on(Events.InteractionCreate, async interaction => {
 
             await channel.send(`Game: **${game}**\nPassword: **${pass}**`);
 
-            const spotsLeft = runs[runId].max - runs[runId].players.length;
+            // 🔥 FILLER DROPDOWN (PRIVATE CHANNEL)
+            await channel.send({
+                content: "Set filler spots (host only):",
+                components: [
+                    new ActionRowBuilder().addComponents(
+                        new StringSelectMenuBuilder()
+                            .setCustomId(`filler_${runId}`)
+                            .setPlaceholder("Select filler spots")
+                            .addOptions(
+                                Array.from({ length: 8 }, (_, i) => ({
+                                    label: `${i} filler spots`,
+                                    value: String(i)
+                                }))
+                            )
+                    )
+                ]
+            });
+
+            const spotsLeft = runs[runId].max - (runs[runId].players.length + runs[runId].fillers);
 
             const msg = await interaction.editReply({
                 content: `🚨 **NEW RUN ALERT!**
@@ -134,14 +156,14 @@ Join Terror Zone Runs on Non-Ladder hosted by <@${host.id}>. There are ${spotsLe
 
             runs[runId].messageId = msg.id;
 
-            // AUTO DELETE AFTER 45 MIN
+            // AUTO DELETE
             setTimeout(async () => {
                 const run = runs[runId];
                 if (!run) return;
 
                 const channel = await interaction.guild.channels.fetch(run.channelId).catch(() => null);
                 if (channel) {
-                    await channel.send("⏰ Run expired after 45 minutes. Closing...");
+                    await channel.send("⏰ Run expired after 45 minutes.");
                     await channel.delete().catch(() => {});
                 }
 
@@ -150,7 +172,7 @@ Join Terror Zone Runs on Non-Ladder hosted by <@${host.id}>. There are ${spotsLe
 
             }, 45 * 60 * 1000);
 
-            // PRIVATE END BUTTON
+            // END BUTTON
             await interaction.followUp({
                 content: "End your run:",
                 ephemeral: true,
@@ -165,41 +187,7 @@ Join Terror Zone Runs on Non-Ladder hosted by <@${host.id}>. There are ${spotsLe
             });
         }
 
-        // RUNS
-        if (interaction.commandName === 'runs') {
-
-            if (Object.keys(runs).length === 0) {
-                return interaction.reply("No active runs.");
-            }
-
-            await interaction.reply("**Active Runs:**");
-
-            for (let id in runs) {
-                const r = runs[id];
-                if (!r) continue;
-
-                const full = r.players.length >= r.max;
-
-                const link = `https://discord.com/channels/${interaction.guild.id}/${interaction.channel.id}/${r.messageId}`;
-
-                await interaction.followUp({
-                    content:
-`👑 Host: <@${r.host}>
-👥 Players: ${r.players.length}/${r.max}
-Status: ${full ? "FULL" : "Active"}`,
-                    components: [
-                        new ActionRowBuilder().addComponents(
-                            new ButtonBuilder()
-                                .setLabel("View")
-                                .setStyle(ButtonStyle.Link)
-                                .setURL(link)
-                        )
-                    ]
-                });
-            }
-        }
-
-        // LEAVE COMMAND
+        // LEAVE
         if (interaction.commandName === 'leave') {
             const runId = userRuns[interaction.user.id];
             if (!runId) return interaction.reply({ content: "You are not in a run.", ephemeral: true });
@@ -210,13 +198,13 @@ Status: ${full ? "FULL" : "Active"}`,
             await interaction.reply({ content: "You left the run.", ephemeral: true });
         }
 
-        // END COMMAND
+        // END
         if (interaction.commandName === 'endrun') {
             const runId = userRuns[interaction.user.id];
             if (!runId) return interaction.reply({ content: "No run.", ephemeral: true });
 
             const run = runs[runId];
-            if (!run || run.host !== interaction.user.id) {
+            if (run.host !== interaction.user.id) {
                 return interaction.reply({ content: "Only host can end.", ephemeral: true });
             }
 
@@ -225,7 +213,7 @@ Status: ${full ? "FULL" : "Active"}`,
         }
     }
 
-    // BUTTONS
+    // ================= BUTTONS =================
     if (interaction.isButton()) {
 
         const [action, runId] = interaction.customId.split("_");
@@ -234,14 +222,15 @@ Status: ${full ? "FULL" : "Active"}`,
 
         const user = interaction.user;
 
-        // JOIN
         if (action === "join") {
 
             if (userRuns[user.id]) {
                 return interaction.reply({ content: "You are already in another run.", ephemeral: true });
             }
 
-            if (run.players.length >= run.max) {
+            const total = run.players.length + run.fillers;
+
+            if (total >= run.max) {
                 return interaction.reply({ content: "Run is full.", ephemeral: true });
             }
 
@@ -251,19 +240,16 @@ Status: ${full ? "FULL" : "Active"}`,
             const channel = await interaction.guild.channels.fetch(run.channelId);
             await channel.permissionOverwrites.edit(user.id, { ViewChannel: true });
 
-            // ✅ UPDATE MAIN MESSAGE
             await updateRunMessage(interaction, runId);
 
-            // ✅ SEND LOG MESSAGE
-            const spotsLeft = run.max - run.players.length;
+            const spotsLeft = run.max - (run.players.length + run.fillers);
 
             await interaction.reply({
                 content: `<@${user.id}> has been added to <@${run.host}>'s run. There are ${spotsLeft} spots left.`,
-                components: [joinOnlyButton(runId, run.players.length >= run.max)]
+                components: [joinOnlyButton(runId, (run.players.length + run.fillers) >= run.max)]
             });
         }
 
-        // LEAVE
         if (action === "leave") {
 
             await leaveRun(interaction, runId);
@@ -274,15 +260,41 @@ Status: ${full ? "FULL" : "Active"}`,
             });
         }
 
-        // END
         if (action === "end") {
 
             if (run.host !== user.id) {
-                return interaction.reply({ content: "Only host can end this run.", ephemeral: true });
+                return interaction.reply({ content: "Only host can end.", ephemeral: true });
             }
 
             await endRun(interaction, runId);
             await interaction.reply("Run ended.");
+        }
+    }
+
+    // ================= DROPDOWN =================
+    if (interaction.isStringSelectMenu()) {
+
+        const [action, runId] = interaction.customId.split("_");
+        const run = runs[runId];
+        if (!run) return;
+
+        if (interaction.user.id !== run.host) {
+            return interaction.reply({ content: "Only host can set fillers.", ephemeral: true });
+        }
+
+        if (action === "filler") {
+
+            const oldFillers = run.fillers;
+            run.fillers = parseInt(interaction.values[0]);
+
+            await updateRunMessage(interaction, runId);
+
+            const spotsLeft = run.max - (run.players.length + run.fillers);
+
+            // ✅ PUBLIC MESSAGE (LIKE JOIN LOG)
+            await interaction.reply({
+                content: `⚙️ <@${interaction.user.id}> set filler spots from ${oldFillers} to ${run.fillers}. There are ${spotsLeft} spots left.`
+            });
         }
     }
 });
