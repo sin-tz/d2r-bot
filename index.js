@@ -432,7 +432,8 @@ async function endRun(interaction, runId) {
 
     run.players.forEach(u => delete userRuns[u]);
     delete runs[runId];
-    
+} 
+
 if (process.env.RUN_DEPLOY === "true") {
     require('./deploy.js');
 }
