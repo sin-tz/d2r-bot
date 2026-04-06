@@ -19,6 +19,9 @@ const TOKEN = process.env.TOKEN;
 let runs = {};
 let userRuns = {};
 
+let duels = {};
+let userDuels = {};
+
 // 🔥 STARTUP CLEANUP
 client.once(Events.ClientReady, async () => {
     console.log(`Logged in as ${client.user.tag}`);
