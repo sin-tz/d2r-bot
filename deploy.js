@@ -8,7 +8,8 @@ const commands = [
     new SlashCommandBuilder().setName('host').setDescription('Start run'),
     new SlashCommandBuilder().setName('leave').setDescription('Leave run'),
     new SlashCommandBuilder().setName('runs').setDescription('Show runs'),
-    new SlashCommandBuilder().setName('endrun').setDescription('End run')
+    new SlashCommandBuilder().setName('endrun').setDescription('End run'),
+    new SlashCommandBuilder().setName('pvp').setDescription('Host public duels')
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
