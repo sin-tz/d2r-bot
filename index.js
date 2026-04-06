@@ -252,11 +252,59 @@ Status: ${full ? "FULL" : "Active"}`,
         }
     }
 
+    // ================= PVP =================
+if (interaction.commandName === 'pvp') {
+
+    if (userDuels[interaction.user.id]) {
+        return interaction.reply({ content: "You are already in a duel.", ephemeral: true });
+    }
+
+    await interaction.deferReply();
+
+    const duelId = Date.now();
+    const host = interaction.user;
+
+    const pass = Math.floor(100 + Math.random() * 900);
+
+    const privateChannel = await interaction.guild.channels.create({
+        name: "crimsonduel",
+        type: ChannelType.GuildText,
+        permissionOverwrites: [
+            { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+            { id: host.id, allow: [PermissionsBitField.Flags.ViewChannel] }
+        ]
+    });
+
+    duels[duelId] = {
+        host: host.id,
+        players: [host.id],
+        max: 8,
+        channelId: privateChannel.id,
+        publicChannelId: interaction.channel.id,
+        messageId: null,
+        pass
+    };
+
+    userDuels[host.id] = duelId;
+
+    await privateChannel.send(`Game: **crimsonduel**\nPassword: **${pass}**`);
+
+    const spotsLeft = 7;
+
+    const msg = await interaction.editReply({
+        content: `⚔ **DUELS HOSTED!**
+Public duels hosted by <@${host.id}>. There are ${spotsLeft} spots left.`,
+        components: [mainButtons(duelId, false)]
+    });
+
+    duels[duelId].messageId = msg.id;
+}
+
     // ================= BUTTONS =================
     if (interaction.isButton()) {
 
         const [action, runId] = interaction.customId.split("_");
-        const run = runs[runId];
+        const run = runs[runId] || duels[runId];
         if (!run) return interaction.reply({ content: "Run not found.", ephemeral: true });
 
         const user = interaction.user;
